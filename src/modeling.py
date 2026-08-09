@@ -5,6 +5,7 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
+  - 2026-08-09 왕채은: 전체 후보 중 CV USD R²가 가장 높은 모델을 자동 선택
   - YYYY-MM-DD 이름: 변경 내용
 
 주요 기능:
@@ -66,6 +67,7 @@ class ModelMetrics(TypedDict):
     cv_log_r2_mean: float
     cv_log_r2_std: float
     cv_mae_usd_mean: float
+    cv_r2_usd_mean: float
     tuning_candidate_count: int
     mae_usd: float
     rmse_usd: float
@@ -111,6 +113,7 @@ MODEL_ADDITIONAL_NUMERIC_FEATURES = [
 ]
 CV_FOLDS = 5
 RANDOM_STATE = 42
+MODEL_SELECTION_COLUMN = "cv_r2_usd_mean"
 
 
 class MultiSelectEncoder(TransformerMixin, BaseEstimator):
@@ -418,10 +421,8 @@ def _run_model_selection(
         )
 
     comparison = pd.DataFrame(records).sort_values(
-        "cv_log_rmse_mean", ignore_index=True
+        MODEL_SELECTION_COLUMN, ascending=False, ignore_index=True
     )
-    # 이번 실험의 목적은 Random Forest 자체를 검증하는 것이다. Ridge가
-    # 더 높은 CV 점수를 보이더라도 모델 종류를 바꾸지 않고 RF를 튜닝한다.
     tuning_target = "RandomForest"
     tuning_space = _search_space(tuning_target)
     candidate_count = min(8, int(np.prod([len(values) for values in tuning_space.values()])))
@@ -430,7 +431,9 @@ def _run_model_selection(
         param_distributions=tuning_space,
         n_iter=candidate_count,
         scoring=CV_SCORING,
-        refit="neg_log_rmse",
+        # 최종 모델 선택 기준과 튜닝 기준을 통일한다. 실제 달러 income의
+        # 설명력을 우선하므로 교차검증 USD R²가 가장 높은 조합을 refit한다.
+        refit="r2_usd",
         cv=folds,
         random_state=RANDOM_STATE,
         n_jobs=-1,
@@ -453,32 +456,25 @@ def _run_model_selection(
     best_index = int(search.best_index_)
     tuned_record = _tuning_record(tuning_target, search, best_index)
     print(
-        f"[모델 튜닝][SUCCESS] {tuning_target} CV log RMSE="
-        f"{tuned_record['cv_log_rmse_mean']:.4f}",
+        f"[모델 튜닝][SUCCESS] {tuning_target} CV USD R2="
+        f"{tuned_record['cv_r2_usd_mean']:.4f}",
         flush=True,
     )
     comparison = pd.concat(
         [comparison, pd.DataFrame([tuned_record])], ignore_index=True
-    ).sort_values("cv_log_rmse_mean", ignore_index=True)
+    ).sort_values(MODEL_SELECTION_COLUMN, ascending=False, ignore_index=True)
 
-    # 제한된 무작위 탐색이 기본값보다 나쁠 수도 있다. 같은 fold의 CV 결과를
-    # 비교해 실제로 나아진 경우에만 튜닝 모델을 채택한다.
-    baseline_score = float(
-        comparison.loc[
-            comparison["model"] == tuning_target, "cv_log_rmse_mean"
-        ].iloc[0]
-    )
-    tuned_score = float(tuned_record["cv_log_rmse_mean"])
-    if tuned_score <= baseline_score:
+    # 모델 종류를 미리 고정하지 않는다. 동일한 train fold에서 측정한 USD R²를
+    # 기준으로 Ridge·기본 RF·튜닝 RF 전체 중 가장 설명력이 높은 모델을 선택한다.
+    selected_name = str(comparison.iloc[0]["model"])
+    if selected_name == f"Tuned {tuning_target}":
         final_pipeline = cast(Pipeline, search.best_estimator_)
-        selected_name = f"Tuned {tuning_target}"
     else:
-        final_pipeline = cast(Pipeline, clone(candidates[tuning_target]))
+        final_pipeline = cast(Pipeline, clone(candidates[selected_name]))
         final_pipeline.fit(x_train, y_train)
-        selected_name = tuning_target
 
     result_columns = [
-        "rank_test_neg_log_rmse",
+        "rank_test_r2_usd",
         "mean_test_neg_log_rmse",
         "std_test_neg_log_rmse",
         "mean_test_log_r2",
@@ -492,7 +488,7 @@ def _run_model_selection(
         lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True)
     )
     tuning_results = tuning_results.sort_values(
-        "rank_test_neg_log_rmse", ignore_index=True
+        "rank_test_r2_usd", ignore_index=True
     )
     return final_pipeline, comparison, tuning_results, selected_name, candidate_count
 
@@ -636,6 +632,7 @@ def train_salary_model(
         cv_log_r2_mean=float(selected_cv["cv_log_r2_mean"]),
         cv_log_r2_std=float(selected_cv["cv_log_r2_std"]),
         cv_mae_usd_mean=float(selected_cv["cv_mae_usd_mean"]),
+        cv_r2_usd_mean=float(selected_cv["cv_r2_usd_mean"]),
         tuning_candidate_count=candidate_count,
         mae_usd=float(mean_absolute_error(y_test_usd, prediction_usd)),
         rmse_usd=float(mean_squared_error(y_test_usd, prediction_usd) ** 0.5),

@@ -5,6 +5,7 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
+  - 2026-08-09 왕채은: 전체 후보의 CV USD R² 기반 최종 모델 선택을 보고서에 반영
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -206,6 +207,7 @@ def generate_report(
                 "cv_log_rmse_std",
                 "cv_log_r2_mean",
                 "cv_mae_usd_mean",
+                "cv_r2_usd_mean",
             ]
         ].round(4).to_markdown(index=False)
         factors_md = importance.head(12).round(4).to_markdown(index=False)
@@ -439,9 +441,11 @@ fold 안에서만 학습했다.
 - 전처리: 수치형 중앙값 대치·표준화, 명목형 원핫, 다중선택 multi-hot
 - 비교 모델: Ridge 기준선, Random Forest
 - 선택 모델: **{metrics['selected_model']}**
+- 선택 기준: train {metrics['cv_folds']}-Fold **CV USD R-squared 최댓값**
 - 검증: train 내부 {metrics['cv_folds']}-Fold 교차검증 + Random Forest 최대 {metrics['tuning_candidate_count']}개 조합 RandomizedSearchCV
 - CV log RMSE: **{metrics['cv_log_rmse_mean']:.3f} ± {metrics['cv_log_rmse_std']:.3f}**
 - CV log R-squared: **{metrics['cv_log_r2_mean']:.3f} ± {metrics['cv_log_r2_std']:.3f}**
+- CV USD R-squared: **{metrics['cv_r2_usd_mean']:.3f}**
 - 누수 방지: holdout test를 모델 선택·튜닝에서 격리하고 train에서만 IQR 경계·전처리·어휘 학습
 - train 기반 IQR 범위: `${max(0.0, metrics['train_salary_lower_bound']):,.2f}` ~ `${metrics['train_salary_upper_bound']:,.2f}`
 - 학습 행: `{metrics['train_rows_before_outlier_filter']:,}` -> `{metrics['train_rows']:,}`
@@ -461,9 +465,9 @@ fold 안에서만 학습했다.
 
 {model_comparison_md}
 
-Ridge는 선형 기준선으로 함께 표시하고, 이번 실험에서는 요청한 Random Forest를
-튜닝·저장한다. 튜닝 결과가 기본 Random Forest보다 나쁠 경우에는 기본
-Random Forest를 유지한다.
+Ridge·기본 Random Forest·튜닝 Random Forest를 같은 train fold에서 비교하고,
+실제 달러 income의 CV R-squared가 가장 높은 후보를 최종 Pipeline으로 저장한다.
+holdout test는 이 선택 과정에 사용하지 않는다.
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
 > {metrics['r2'] * 100:.1f}%를 설명하고 평균 절대오차는

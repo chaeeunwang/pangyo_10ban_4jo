@@ -265,9 +265,11 @@ fold 안에서만 학습했다.
 - 전처리: 수치형 중앙값 대치·표준화, 명목형 원핫, 다중선택 multi-hot
 - 비교 모델: Ridge 기준선, Random Forest
 - 선택 모델: **Tuned RandomForest**
+- 선택 기준: train 5-Fold **CV USD R-squared 최댓값**
 - 검증: train 내부 5-Fold 교차검증 + Random Forest 최대 8개 조합 RandomizedSearchCV
 - CV log RMSE: **1.019 ± 0.042**
 - CV log R-squared: **0.443 ± 0.021**
+- CV USD R-squared: **0.570**
 - 누수 방지: holdout test를 모델 선택·튜닝에서 격리하고 train에서만 IQR 경계·전처리·어휘 학습
 - train 기반 IQR 범위: `$0.00` ~ `$221,445.38`
 - 학습 행: `18,748` -> `17,961`
@@ -285,15 +287,15 @@ fold 안에서만 학습했다.
 
 ### 5-Fold 모델 비교
 
-| model              | tuned   |   cv_log_rmse_mean |   cv_log_rmse_std |   cv_log_r2_mean |   cv_mae_usd_mean |
-|:-------------------|:--------|-------------------:|------------------:|-----------------:|------------------:|
-| Ridge              | False   |             1.0111 |            0.0439 |           0.4514 |           24614.2 |
-| Tuned RandomForest | True    |             1.0192 |            0.042  |           0.4425 |           23500   |
-| RandomForest       | False   |             1.021  |            0.0427 |           0.4406 |           23775.3 |
+| model              | tuned   |   cv_log_rmse_mean |   cv_log_rmse_std |   cv_log_r2_mean |   cv_mae_usd_mean |   cv_r2_usd_mean |
+|:-------------------|:--------|-------------------:|------------------:|-----------------:|------------------:|-----------------:|
+| Tuned RandomForest | True    |             1.0192 |            0.042  |           0.4425 |           23500   |           0.5701 |
+| RandomForest       | False   |             1.021  |            0.0427 |           0.4406 |           23775.3 |           0.564  |
+| Ridge              | False   |             1.0111 |            0.0439 |           0.4514 |           24614.2 |           0.5163 |
 
-Ridge는 선형 기준선으로 함께 표시하고, 이번 실험에서는 요청한 Random Forest를
-튜닝·저장한다. 튜닝 결과가 기본 Random Forest보다 나쁠 경우에는 기본
-Random Forest를 유지한다.
+Ridge·기본 Random Forest·튜닝 Random Forest를 같은 train fold에서 비교하고,
+실제 달러 income의 CV R-squared가 가장 높은 후보를 최종 Pipeline으로 저장한다.
+holdout test는 이 선택 과정에 사용하지 않는다.
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
 > 56.6%를 설명하고 평균 절대오차는
