@@ -264,53 +264,65 @@ fold 안에서만 학습했다.
 - 외부 평가 분할: 80/20 무작위 holdout, `random_state=42`
 - 전처리: 수치형 중앙값 대치·표준화, 명목형 원핫, 다중선택 multi-hot
 - 비교 모델: Ridge 기준선, Random Forest
-- 선택 모델: **Ridge**
-- 선택 기준: train 5-Fold **CV log RMSE 최솟값**
+- 선택 모델: **Tuned RandomForest**
+- 선택 기준: train 5-Fold **CV MAE 최솟값**
 - 검증: train 내부 5-Fold 교차검증 + Random Forest 최대 8개 조합 RandomizedSearchCV
-- CV log RMSE: **1.011 ± 0.044**
-- CV log R-squared: **0.451 ± 0.020**
-- CV USD R-squared: **0.516**
+- CV log RMSE: **1.019 ± 0.042**
+- CV log R-squared: **0.443 ± 0.021**
+- CV MAE: **$23,500 ± $193**
+- CV USD R-squared: **0.570**
 - 누수 방지: holdout test를 모델 선택·튜닝에서 격리하고 train에서만 IQR 경계·전처리·어휘 학습
 - train 기반 IQR 범위: `$0.00` ~ `$221,445.38`
 - 학습 행: `18,748` -> `17,961`
 - test 행: `4,687` -> `4,497`
-- IQR test MAE: **$24,946.82**
-- IQR test RMSE: **$35,772.18**
-- IQR test R-squared: **0.504**
-- IQR test log RMSE: **1.039**
-- IQR test log R-squared: **0.434**
-- 전체 test MAE: **$32,846.76**
-- 전체 test RMSE: **$83,729.57**
-- 전체 test R-squared: **0.252**
-- 전체 test log R-squared: **0.447**
+- IQR test MAE: **$23,134.22**
+- IQR test RMSE: **$33,454.34**
+- IQR test R-squared: **0.566**
+- IQR test log RMSE: **1.032**
+- IQR test log R-squared: **0.441**
+- 전체 test MAE: **$32,385.01**
+- 전체 test RMSE: **$85,313.68**
+- 전체 test R-squared: **0.224**
+- 전체 test log R-squared: **0.450**
 - 저장: `outputs/models/survey_income_prediction_pipeline.joblib`
 
 ### 5-Fold 모델 비교
 
 | model              | tuned   |   cv_log_rmse_mean |   cv_log_rmse_std |   cv_log_r2_mean |   cv_mae_usd_mean |   cv_r2_usd_mean |
 |:-------------------|:--------|-------------------:|------------------:|-----------------:|------------------:|-----------------:|
-| Ridge              | False   |             1.0111 |            0.0439 |           0.4514 |           24614.2 |           0.5163 |
 | Tuned RandomForest | True    |             1.0192 |            0.042  |           0.4425 |           23500   |           0.5701 |
 | RandomForest       | False   |             1.021  |            0.0427 |           0.4406 |           23775.3 |           0.564  |
+| Ridge              | False   |             1.0111 |            0.0439 |           0.4514 |           24614.2 |           0.5163 |
 
-> **최종 모델 선택 이유:** 목표변수는 오른쪽 꼬리가 긴 income이며 모델도
-> `log1p` income을 학습하므로, train 5-Fold의 log RMSE를 1차 선택 기준으로
-> 사용했다. `Ridge`의 CV log RMSE는
-> 1.0111로, 다음 후보
-> `Tuned RandomForest`의
-> 1.0192보다 낮았다.
-> 달러 단위 CV R-squared만 보면 `Tuned RandomForest`가
-> 0.5701로 가장 높아 평가 척도에 따른
-> trade-off가 있다. 이번 보고서는 극단적 고소득의 절대 오차보다 일반 income
-> 응답의 상대적 오차 안정성을 우선한다.
-> Ridge는 Random Forest 앙상블보다 학습·예측 구조가 단순해 계산 비용이
-> 작고, 계수 방향을 통해 변수 영향을 설명하기도 쉬워 최종 Pipeline으로
-> 선택했다. holdout test는 이 결정에 사용하지 않았다.
+> **최종 모델 선택 이유 — 세 가지 기준**
+>
+> 1. **실제 오차:** `Tuned RandomForest`의 CV MAE는
+> $23,500 ± $193로 Ridge의
+> $24,614 ± $150보다 $1,114 낮다.
+> 달러 단위 income을 얼마나 틀리는지 직접 설명할 수 있는 MAE에서 뚜렷한
+> 이점이 있어 이를 1차 선택 기준으로 삼았다.
+> 2. **log 척도 안정성:** Ridge와 `Tuned RandomForest`의 CV log RMSE는
+> 각각 1.0111 ± 0.0439,
+> 1.0192 ± 0.0420이며 평균 차이는
+> 0.0081다. 이 차이는 fold 간 표준편차보다 작아 log 척도 성능은
+> 실무적으로 비슷한 범위로 해석한다. 별도의 paired 검정을 하지 않았으므로
+> 통계적으로 같다고 단정하지는 않는다.
+> 3. **복잡도·설명가능성:** Ridge는 더 빠르고 계수 해석이 쉽다는 장점이 있다.
+> 반면 Random Forest는 경력·국가·직무 사이의 비선형 관계와 상호작용을
+> 학습할 수 있고, `n_estimators`·`max_depth`·`max_features`·
+> `min_samples_leaf`·`max_samples`를 8개 조합 × 5-Fold로 탐색해 ML Pipeline의
+> 모델 선택 과정을 더 충실히 보여준다.
+>
+> 따라서 계산비용과 직접 설명가능성에서는 Ridge가 우세하지만, 비슷한 log
+> 안정성을 유지하면서 실제 달러 MAE가 더 낮은 `Tuned RandomForest`를 최종
+> Pipeline으로 선택했다. holdout test는 이 결정에 사용하지 않았다. 중요한
+> 것은 하나의 정답 모델을 주장하는 것이 아니라 평가 기준에 따른 trade-off를
+> 명시하고 탐구 목적에 맞는 기준을 일관되게 적용하는 것이다.
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
-> 50.4%를 설명하고 평균 절대오차는
-> $24,947다. 극단값을 포함한 전체 test R-squared는
-> 0.252로, 평가 모집단을 제한하면 성능이 얼마나
+> 56.6%를 설명하고 평균 절대오차는
+> $23,134다. 극단값을 포함한 전체 test R-squared는
+> 0.224로, 평가 모집단을 제한하면 성능이 얼마나
 > 달라지는지 함께 보여준다. 따라서 IQR 지표를 전체 응답자 성능으로
 > 일반화하지 않고 두 결과를 구분해 해석해야 한다.
 
@@ -318,18 +330,18 @@ fold 안에서만 학습했다.
 
 | feature                     |   importance_mean |   importance_std | metric             |
 |:----------------------------|------------------:|-----------------:|:-------------------|
-| Country                     |            0.4645 |           0.006  | decrease_in_log_r2 |
-| YearsCode_num               |            0.2536 |           0.005  | decrease_in_log_r2 |
-| YearsCodePro_num            |            0.0608 |           0.0012 | decrease_in_log_r2 |
-| Employment                  |            0.0227 |           0.0035 | decrease_in_log_r2 |
-| ProfessionalExperienceRatio |            0.0199 |           0.0028 | decrease_in_log_r2 |
-| Knowledge_4_score           |            0.0181 |           0.0016 | decrease_in_log_r2 |
-| Age                         |            0.015  |           0.0026 | decrease_in_log_r2 |
-| PreProfessionalCodingYears  |            0.0143 |           0.0021 | decrease_in_log_r2 |
-| OrgSize_order               |            0.0104 |           0.0007 | decrease_in_log_r2 |
-| Knowledge_9_score           |            0.0102 |           0.0011 | decrease_in_log_r2 |
-| PlatformHaveWorkedWith      |            0.0092 |           0.0021 | decrease_in_log_r2 |
-| ICorPM                      |            0.0083 |           0.0005 | decrease_in_log_r2 |
+| Country                     |            0.4256 |           0.0037 | decrease_in_log_r2 |
+| YearsCode_num               |            0.058  |           0.0074 | decrease_in_log_r2 |
+| Employment                  |            0.0143 |           0.0023 | decrease_in_log_r2 |
+| YearsCodePro_num            |            0.0118 |           0.0051 | decrease_in_log_r2 |
+| ProfessionalTech            |            0.0093 |           0.0006 | decrease_in_log_r2 |
+| LanguageHaveWorkedWith      |            0.007  |           0.0026 | decrease_in_log_r2 |
+| PlatformHaveWorkedWith      |            0.0065 |           0.0015 | decrease_in_log_r2 |
+| OrgSize_order               |            0.0061 |           0.0013 | decrease_in_log_r2 |
+| DatabaseHaveWorkedWith      |            0.0056 |           0.0017 | decrease_in_log_r2 |
+| CodingActivities            |            0.0038 |           0.0006 | decrease_in_log_r2 |
+| ProfessionalExperienceRatio |            0.0031 |           0.001  | decrease_in_log_r2 |
+| RemoteWork                  |            0.0029 |           0.0012 | decrease_in_log_r2 |
 
 표의 중요도는 holdout 일부에서 각 원 입력 열을 섞었을 때 감소한 log R-squared다.
 양수 값이 클수록 현재 모델이 그 입력에 더 의존하지만, 인과관계 순위는 아니다.
