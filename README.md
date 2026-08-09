@@ -96,8 +96,9 @@ python main.py --data /absolute/path/results.csv
   MAE, RMSE, R-squared와 log 척도 지표를 출력합니다.
 - Ridge를 기준선으로 두고 Random Forest를 동일한 5-Fold로 비교하며,
   Random Forest를 최대 8개 조합으로 튜닝합니다. 전체 후보 중 train
-  5-Fold CV USD R-squared가 가장 높은 모델을 선택하며, 모델 선택과
-  튜닝이 끝날 때까지 holdout test는 사용하지 않습니다.
+  5-Fold CV log RMSE가 가장 낮은 모델을 선택합니다. 오른쪽 꼬리가 긴
+  income을 `log1p`로 학습한 목적에 맞춰 일반 응답의 상대적 오차 안정성을
+  우선하며, 모델 선택과 튜닝이 끝날 때까지 holdout test는 사용하지 않습니다.
 
 ## 분석 단계
 

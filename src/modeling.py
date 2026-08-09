@@ -6,6 +6,7 @@
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
   - 2026-08-09 왕채은: 전체 후보 중 CV USD R²가 가장 높은 모델을 자동 선택
+  - 2026-08-09 왕채은: log1p 학습 목적에 맞춰 CV log RMSE 기반 모델 선택으로 변경
   - YYYY-MM-DD 이름: 변경 내용
 
 주요 기능:
@@ -113,7 +114,7 @@ MODEL_ADDITIONAL_NUMERIC_FEATURES = [
 ]
 CV_FOLDS = 5
 RANDOM_STATE = 42
-MODEL_SELECTION_COLUMN = "cv_r2_usd_mean"
+MODEL_SELECTION_COLUMN = "cv_log_rmse_mean"
 
 
 class MultiSelectEncoder(TransformerMixin, BaseEstimator):
@@ -421,7 +422,7 @@ def _run_model_selection(
         )
 
     comparison = pd.DataFrame(records).sort_values(
-        MODEL_SELECTION_COLUMN, ascending=False, ignore_index=True
+        MODEL_SELECTION_COLUMN, ascending=True, ignore_index=True
     )
     tuning_target = "RandomForest"
     tuning_space = _search_space(tuning_target)
@@ -431,9 +432,9 @@ def _run_model_selection(
         param_distributions=tuning_space,
         n_iter=candidate_count,
         scoring=CV_SCORING,
-        # 최종 모델 선택 기준과 튜닝 기준을 통일한다. 실제 달러 income의
-        # 설명력을 우선하므로 교차검증 USD R²가 가장 높은 조합을 refit한다.
-        refit="r2_usd",
+        # 목표를 log1p로 학습한 이유와 최종 선택 기준을 통일한다. 고소득
+        # 극단값보다 일반 응답의 상대적 오차를 안정적으로 줄이는 조합을 refit한다.
+        refit="neg_log_rmse",
         cv=folds,
         random_state=RANDOM_STATE,
         n_jobs=-1,
@@ -456,16 +457,16 @@ def _run_model_selection(
     best_index = int(search.best_index_)
     tuned_record = _tuning_record(tuning_target, search, best_index)
     print(
-        f"[모델 튜닝][SUCCESS] {tuning_target} CV USD R2="
-        f"{tuned_record['cv_r2_usd_mean']:.4f}",
+        f"[모델 튜닝][SUCCESS] {tuning_target} CV log RMSE="
+        f"{tuned_record['cv_log_rmse_mean']:.4f}",
         flush=True,
     )
     comparison = pd.concat(
         [comparison, pd.DataFrame([tuned_record])], ignore_index=True
-    ).sort_values(MODEL_SELECTION_COLUMN, ascending=False, ignore_index=True)
+    ).sort_values(MODEL_SELECTION_COLUMN, ascending=True, ignore_index=True)
 
-    # 모델 종류를 미리 고정하지 않는다. 동일한 train fold에서 측정한 USD R²를
-    # 기준으로 Ridge·기본 RF·튜닝 RF 전체 중 가장 설명력이 높은 모델을 선택한다.
+    # 모델 종류를 미리 고정하지 않는다. 동일한 train fold에서 측정한 log RMSE를
+    # 기준으로 Ridge·기본 RF·튜닝 RF 전체 중 상대적 예측 오차가 가장 작은 모델을 선택한다.
     selected_name = str(comparison.iloc[0]["model"])
     if selected_name == f"Tuned {tuning_target}":
         final_pipeline = cast(Pipeline, search.best_estimator_)
@@ -474,7 +475,7 @@ def _run_model_selection(
         final_pipeline.fit(x_train, y_train)
 
     result_columns = [
-        "rank_test_r2_usd",
+        "rank_test_neg_log_rmse",
         "mean_test_neg_log_rmse",
         "std_test_neg_log_rmse",
         "mean_test_log_r2",
@@ -488,7 +489,7 @@ def _run_model_selection(
         lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True)
     )
     tuning_results = tuning_results.sort_values(
-        "rank_test_r2_usd", ignore_index=True
+        "rank_test_neg_log_rmse", ignore_index=True
     )
     return final_pipeline, comparison, tuning_results, selected_name, candidate_count
 

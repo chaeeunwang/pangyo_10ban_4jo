@@ -6,6 +6,7 @@
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
   - 2026-08-09 왕채은: 전체 후보의 CV USD R² 기반 최종 모델 선택을 보고서에 반영
+  - 2026-08-09 왕채은: Ridge 선택 근거와 달러 척도 성능의 trade-off를 보고서에 명시
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -214,6 +215,46 @@ def generate_report(
     except ImportError as exc:
         raise AnalysisError("보고서 표에 필요한 tabulate가 없습니다.") from exc
     t = test_result
+    ranked_by_log_error = model_comparison.sort_values(
+        "cv_log_rmse_mean", ascending=True, ignore_index=True
+    )
+    selected_cv_row = ranked_by_log_error.iloc[0]
+    runner_up_cv_row = ranked_by_log_error.iloc[1]
+    best_usd_r2_row = model_comparison.sort_values(
+        "cv_r2_usd_mean", ascending=False, ignore_index=True
+    ).iloc[0]
+    selected_model_name = str(selected_cv_row["model"])
+    runner_up_model_name = str(runner_up_cv_row["model"])
+    best_usd_r2_model_name = str(best_usd_r2_row["model"])
+    selected_log_rmse = float(cast(Any, selected_cv_row.at["cv_log_rmse_mean"]))
+    runner_up_log_rmse = float(cast(Any, runner_up_cv_row.at["cv_log_rmse_mean"]))
+    best_usd_r2 = float(cast(Any, best_usd_r2_row.at["cv_r2_usd_mean"]))
+    common_selection_explanation = f"""
+> **최종 모델 선택 이유:** 목표변수는 오른쪽 꼬리가 긴 income이며 모델도
+> `log1p` income을 학습하므로, train 5-Fold의 log RMSE를 1차 선택 기준으로
+> 사용했다. `{selected_model_name}`의 CV log RMSE는
+> {selected_log_rmse:.4f}로, 다음 후보
+> `{runner_up_model_name}`의
+> {runner_up_log_rmse:.4f}보다 낮았다.
+> 달러 단위 CV R-squared만 보면 `{best_usd_r2_model_name}`가
+> {best_usd_r2:.4f}로 가장 높아 평가 척도에 따른
+> trade-off가 있다. 이번 보고서는 극단적 고소득의 절대 오차보다 일반 income
+> 응답의 상대적 오차 안정성을 우선한다.
+""".strip()
+    if selected_model_name == "Ridge":
+        selection_explanation = (
+            common_selection_explanation
+            + "\n> Ridge는 Random Forest 앙상블보다 학습·예측 구조가 단순해 계산 비용이"
+            "\n> 작고, 계수 방향을 통해 변수 영향을 설명하기도 쉬워 최종 Pipeline으로"
+            "\n> 선택했다. holdout test는 이 결정에 사용하지 않았다."
+        )
+    else:
+        selection_explanation = (
+            common_selection_explanation
+            + f"\n> `{selected_model_name}`는 비선형 관계와 변수 간 상호작용을 학습하면서도"
+            "\n> 1차 기준인 CV log RMSE가 가장 낮아 선택했다. holdout test는 이 결정에"
+            "\n> 사용하지 않았다."
+        )
     quality_values = quality.set_index("item")["value"]
     # pandas 타입 스텁은 단일 셀 접근도 complex를 포함한 Scalar로
     # 넓게 추론한다. 이 표들은 숫자형 산출물임을 이미 검증했으므로
@@ -441,7 +482,7 @@ fold 안에서만 학습했다.
 - 전처리: 수치형 중앙값 대치·표준화, 명목형 원핫, 다중선택 multi-hot
 - 비교 모델: Ridge 기준선, Random Forest
 - 선택 모델: **{metrics['selected_model']}**
-- 선택 기준: train {metrics['cv_folds']}-Fold **CV USD R-squared 최댓값**
+- 선택 기준: train {metrics['cv_folds']}-Fold **CV log RMSE 최솟값**
 - 검증: train 내부 {metrics['cv_folds']}-Fold 교차검증 + Random Forest 최대 {metrics['tuning_candidate_count']}개 조합 RandomizedSearchCV
 - CV log RMSE: **{metrics['cv_log_rmse_mean']:.3f} ± {metrics['cv_log_rmse_std']:.3f}**
 - CV log R-squared: **{metrics['cv_log_r2_mean']:.3f} ± {metrics['cv_log_r2_std']:.3f}**
@@ -465,9 +506,7 @@ fold 안에서만 학습했다.
 
 {model_comparison_md}
 
-Ridge·기본 Random Forest·튜닝 Random Forest를 같은 train fold에서 비교하고,
-실제 달러 income의 CV R-squared가 가장 높은 후보를 최종 Pipeline으로 저장한다.
-holdout test는 이 선택 과정에 사용하지 않는다.
+{selection_explanation}
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
 > {metrics['r2'] * 100:.1f}%를 설명하고 평균 절대오차는
