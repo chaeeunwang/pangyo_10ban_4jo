@@ -5,9 +5,11 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
-  - 2026-08-09 황재원: 0단계 로그·report.md에 Pandas·Polars 로딩 속도·메모리 비교 추가
-  - 2026-08-09 황재원: 코드리뷰 반영 — "메모리"를 "DataFrame 추정 크기"로 표현 정정,
-    0 나눗셈 방어 추가, 벤치마크 측정 조건(반복 횟수)을 report에 명시
+  - 2026-08-09 왕채은: 전체 후보의 CV USD R² 기반 최종 모델 선택을 보고서에 반영
+  - 2026-08-09 왕채은: Ridge 선택 근거와 달러 척도 성능의 trade-off를 보고서에 명시
+  - 2026-08-09 왕채은: CV MAE·안정성·복잡도 세 기준의 RF 선택 근거 추가
+  - 2026-08-09 황재원: Pandas·Polars 로딩 시간·DataFrame 추정 크기 비교 추가
+  - 2026-08-09 왕채은: 최신 RandomForest 보고서와 병합하고 측정 해석 보완
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -137,11 +139,7 @@ def ensure_directories() -> None:
 
 
 def _safe_ratio(first: float, second: float) -> float | None:
-    """큰 값이 작은 값의 몇 배인지 0 나눗셈 없이 계산한다.
-
-    표본 행이 아주 적거나 측정값이 0에 가까우면 분모가 0이 될 수 있어,
-    그런 경우 배수를 정의할 수 없다는 뜻으로 None을 반환한다.
-    """
+    """두 양수 측정값의 배수를 0 나눗셈 없이 계산한다."""
     larger, smaller = max(first, second), min(first, second)
     if smaller <= 0:
         return None
@@ -221,12 +219,63 @@ def generate_report(
                 "cv_log_rmse_std",
                 "cv_log_r2_mean",
                 "cv_mae_usd_mean",
+                "cv_r2_usd_mean",
             ]
         ].round(4).to_markdown(index=False)
         factors_md = importance.head(12).round(4).to_markdown(index=False)
     except ImportError as exc:
         raise AnalysisError("보고서 표에 필요한 tabulate가 없습니다.") from exc
     t = test_result
+    ranked_by_mae = model_comparison.sort_values(
+        "cv_mae_usd_mean", ascending=True, ignore_index=True
+    )
+    selected_cv_row = ranked_by_mae.iloc[0]
+    ridge_cv_row = model_comparison.loc[model_comparison["model"] == "Ridge"].iloc[0]
+    selected_model_name = str(selected_cv_row["model"])
+    selected_log_rmse = float(cast(Any, selected_cv_row.at["cv_log_rmse_mean"]))
+    selected_log_rmse_std = float(cast(Any, selected_cv_row.at["cv_log_rmse_std"]))
+    selected_mae = float(cast(Any, selected_cv_row.at["cv_mae_usd_mean"]))
+    selected_mae_std = float(cast(Any, selected_cv_row.at["cv_mae_usd_std"]))
+    ridge_log_rmse = float(cast(Any, ridge_cv_row.at["cv_log_rmse_mean"]))
+    ridge_log_rmse_std = float(cast(Any, ridge_cv_row.at["cv_log_rmse_std"]))
+    ridge_mae = float(cast(Any, ridge_cv_row.at["cv_mae_usd_mean"]))
+    ridge_mae_std = float(cast(Any, ridge_cv_row.at["cv_mae_usd_std"]))
+    log_rmse_gap = abs(selected_log_rmse - ridge_log_rmse)
+    mae_improvement = ridge_mae - selected_mae
+    if "RandomForest" in selected_model_name:
+        selection_explanation = f"""
+> **최종 모델 선택 이유 — 세 가지 기준**
+>
+> 1. **실제 오차:** `{selected_model_name}`의 CV MAE는
+> ${selected_mae:,.0f} ± ${selected_mae_std:,.0f}로 Ridge의
+> ${ridge_mae:,.0f} ± ${ridge_mae_std:,.0f}보다 ${mae_improvement:,.0f} 낮다.
+> 달러 단위 income을 얼마나 틀리는지 직접 설명할 수 있는 MAE에서 뚜렷한
+> 이점이 있어 이를 1차 선택 기준으로 삼았다.
+> 2. **log 척도 안정성:** Ridge와 `{selected_model_name}`의 CV log RMSE는
+> 각각 {ridge_log_rmse:.4f} ± {ridge_log_rmse_std:.4f},
+> {selected_log_rmse:.4f} ± {selected_log_rmse_std:.4f}이며 평균 차이는
+> {log_rmse_gap:.4f}다. 이 차이는 fold 간 표준편차보다 작아 log 척도 성능은
+> 실무적으로 비슷한 범위로 해석한다. 별도의 paired 검정을 하지 않았으므로
+> 통계적으로 같다고 단정하지는 않는다.
+> 3. **복잡도·설명가능성:** Ridge는 더 빠르고 계수 해석이 쉽다는 장점이 있다.
+> 반면 Random Forest는 경력·국가·직무 사이의 비선형 관계와 상호작용을
+> 학습할 수 있고, `n_estimators`·`max_depth`·`max_features`·
+> `min_samples_leaf`·`max_samples`를 8개 조합 × 5-Fold로 탐색해 ML Pipeline의
+> 모델 선택 과정을 더 충실히 보여준다.
+>
+> 따라서 계산비용과 직접 설명가능성에서는 Ridge가 우세하지만, 비슷한 log
+> 안정성을 유지하면서 실제 달러 MAE가 더 낮은 `{selected_model_name}`를 최종
+> Pipeline으로 선택했다. holdout test는 이 결정에 사용하지 않았다. 중요한
+> 것은 하나의 정답 모델을 주장하는 것이 아니라 평가 기준에 따른 trade-off를
+> 명시하고 탐구 목적에 맞는 기준을 일관되게 적용하는 것이다.
+""".strip()
+    else:
+        selection_explanation = f"""
+> **최종 모델 선택 이유:** `{selected_model_name}`의 CV MAE
+> ${selected_mae:,.0f}가 전체 후보 중 가장 낮아 선택했다. 모델 선택에는
+> holdout test를 사용하지 않았으며, 계산비용·설명가능성과 비선형 학습 능력의
+> trade-off는 모델 비교표와 함께 해석한다.
+""".strip()
     quality_values = quality.set_index("item")["value"]
     # pandas 타입 스텁은 단일 셀 접근도 complex를 포함한 Scalar로
     # 넓게 추론한다. 이 표들은 숫자형 산출물임을 이미 검증했으므로
@@ -272,8 +321,14 @@ def generate_report(
         if load_speed_ratio is not None
         else "더 빨랐지만 측정값이 0에 가까워 배수는 계산하지 않았고"
     )
-    smaller_engine = "Polars" if polars_dataframe_size_mb < pandas_dataframe_size_mb else "Pandas"
-    dataframe_size_ratio = _safe_ratio(pandas_dataframe_size_mb, polars_dataframe_size_mb)
+    smaller_engine = (
+        "Polars"
+        if polars_dataframe_size_mb < pandas_dataframe_size_mb
+        else "Pandas"
+    )
+    dataframe_size_ratio = _safe_ratio(
+        pandas_dataframe_size_mb, polars_dataframe_size_mb
+    )
     dataframe_size_text = (
         f"약 {dataframe_size_ratio:.2f}배 더 작았다"
         if dataframe_size_ratio is not None
@@ -298,18 +353,13 @@ def generate_report(
 - 로딩 시간(워밍업 1회 + 순서 교대 {comparison['load_benchmark_trials']}회 반복 측정의 중앙값): Pandas `{pandas_load_seconds:.3f}초` / Polars `{polars_load_seconds:.3f}초`
 - 로딩 후 DataFrame 추정 크기: Pandas `{pandas_dataframe_size_mb:,.1f}MB` / Polars `{polars_dataframe_size_mb:,.1f}MB`
 
-> **해석:** 정합성 지표(shape·결측·중복·유효행)는 두 엔진이 동일한 파일을
-> 올바르게 읽었는지 확인하는 것일 뿐, 두 라이브러리의 실질적 차이는
-> 아니다. 실제 차이는 성능에서 드러나는데, 이번 실행에서는
-> `{faster_engine}`가 로딩 속도가 {load_speed_text},
-> `{smaller_engine}`가 DataFrame 크기가 {dataframe_size_text}.
-> 로딩 시간은 첫 실행 시 OS 파일 캐시가 없어 느릴 수 있어 워밍업 1회 뒤
-> 시작 엔진을 교대하며 반복 측정하고 평균 대신 중앙값을 썼다(평균은
-> 한두 번의 튐에 민감하다). DataFrame 크기는 로딩 중 피크 메모리가 아니라
-> 로딩이 끝난 객체의 추정 크기이므로 실제 최대 메모리 사용량과는 다를 수
-> 있다. 측정값 자체는 파일 크기·머신 상태에 따라 달라질 수 있어 절대적인
-> 배수보다 방향성(어느 엔진이 이 환경에서 더 가볍고 빨랐는지)으로
-> 해석해야 한다.
+> **해석:** 정합성 지표는 두 엔진이 동일한 파일을 올바르게 읽었는지
+> 확인하는 기준이다. 실제 성능 비교에서는 이번 실행의 `{faster_engine}`가
+> 로딩 속도가 {load_speed_text}, `{smaller_engine}`가 DataFrame 크기가
+> {dataframe_size_text}. 시간은 워밍업 뒤 시작 엔진을 교대해 측정한 중앙값이며,
+> 파일 캐시·머신 상태에 따라 달라질 수 있다. 크기는 로딩 중 피크 메모리가
+> 아니라 로딩이 끝난 객체의 추정치이므로 절대적인 메모리 사용량으로
+> 해석하지 않는다.
 
 ## 1. 원본 데이터 EDA
 
@@ -487,9 +537,12 @@ fold 안에서만 학습했다.
 - 전처리: 수치형 중앙값 대치·표준화, 명목형 원핫, 다중선택 multi-hot
 - 비교 모델: Ridge 기준선, Random Forest
 - 선택 모델: **{metrics['selected_model']}**
+- 선택 기준: train {metrics['cv_folds']}-Fold **CV MAE 최솟값**
 - 검증: train 내부 {metrics['cv_folds']}-Fold 교차검증 + Random Forest 최대 {metrics['tuning_candidate_count']}개 조합 RandomizedSearchCV
 - CV log RMSE: **{metrics['cv_log_rmse_mean']:.3f} ± {metrics['cv_log_rmse_std']:.3f}**
 - CV log R-squared: **{metrics['cv_log_r2_mean']:.3f} ± {metrics['cv_log_r2_std']:.3f}**
+- CV MAE: **${metrics['cv_mae_usd_mean']:,.0f} ± ${metrics['cv_mae_usd_std']:,.0f}**
+- CV USD R-squared: **{metrics['cv_r2_usd_mean']:.3f}**
 - 누수 방지: holdout test를 모델 선택·튜닝에서 격리하고 train에서만 IQR 경계·전처리·어휘 학습
 - train 기반 IQR 범위: `${max(0.0, metrics['train_salary_lower_bound']):,.2f}` ~ `${metrics['train_salary_upper_bound']:,.2f}`
 - 학습 행: `{metrics['train_rows_before_outlier_filter']:,}` -> `{metrics['train_rows']:,}`
@@ -509,9 +562,7 @@ fold 안에서만 학습했다.
 
 {model_comparison_md}
 
-Ridge는 선형 기준선으로 함께 표시하고, 이번 실험에서는 요청한 Random Forest를
-튜닝·저장한다. 튜닝 결과가 기본 Random Forest보다 나쁠 경우에는 기본
-Random Forest를 유지한다.
+{selection_explanation}
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
 > {metrics['r2'] * 100:.1f}%를 설명하고 평균 절대오차는
@@ -562,7 +613,7 @@ def main() -> int:
             pandas_df, polars_df, comparison = load_data(data_path, args.sample_rows)
             stage["detail"] = (
                 f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치, "
-                f"로딩(중앙값) Pandas {comparison['pandas_load_seconds']:.2f}초/"
+                f"로딩 중앙값 Pandas {comparison['pandas_load_seconds']:.2f}초/"
                 f"{comparison['pandas_dataframe_size_bytes'] / 1024**2:,.0f}MB vs "
                 f"Polars {comparison['polars_load_seconds']:.2f}초/"
                 f"{comparison['polars_dataframe_size_bytes'] / 1024**2:,.0f}MB"

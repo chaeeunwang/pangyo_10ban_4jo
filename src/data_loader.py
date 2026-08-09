@@ -43,7 +43,8 @@ DOWNLOAD_TIMEOUT_SECONDS = 60
 # 첫 로딩은 OS 파일 캐시가 없어 느리므로 워밍업 1회로 캐시를 채운 뒤,
 # 어느 엔진을 먼저 읽어도 유리해지지 않도록 순서를 교대하며 이 횟수만큼
 # 반복 측정하고 중앙값을 채택한다(평균은 한두 번의 튐에 민감해서 피한다).
-LOAD_BENCHMARK_TRIALS = 3
+# 짝수 회로 두 엔진이 먼저 실행되는 횟수까지 동일하게 맞춘다.
+LOAD_BENCHMARK_TRIALS = 4
 REQUIRED_COLUMNS = {
     "ResponseId", "YearsCode", "YearsCodePro", "ConvertedCompYearly",
     "LanguageHaveWorkedWith", "RemoteWork", "Age", "EdLevel", "DevType",

@@ -95,8 +95,10 @@ python main.py --data /absolute/path/results.csv
 - 목표가 연속형 income인 회귀 문제이므로 분류용 정확도·F1 대신
   MAE, RMSE, R-squared와 log 척도 지표를 출력합니다.
 - Ridge를 기준선으로 두고 Random Forest를 동일한 5-Fold로 비교하며,
-  Random Forest를 최대 8개 조합으로 튜닝합니다. 모델 선택과 튜닝이
-  끝날 때까지 holdout test는 사용하지 않습니다.
+  Random Forest를 최대 8개 조합으로 튜닝합니다. 전체 후보 중 train
+  5-Fold CV MAE가 가장 낮은 모델을 선택합니다. log 척도 안정성·달러 단위
+  실제 오차·계산비용과 설명가능성의 trade-off를 함께 보고하며, 모델 선택과
+  튜닝이 끝날 때까지 holdout test는 사용하지 않습니다.
 
 ## 분석 단계
 
