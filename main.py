@@ -8,6 +8,8 @@
   - 2026-08-09 왕채은: 전체 후보의 CV USD R² 기반 최종 모델 선택을 보고서에 반영
   - 2026-08-09 왕채은: Ridge 선택 근거와 달러 척도 성능의 trade-off를 보고서에 명시
   - 2026-08-09 왕채은: CV MAE·안정성·복잡도 세 기준의 RF 선택 근거 추가
+  - 2026-08-09 황재원: Pandas·Polars 로딩 시간·DataFrame 추정 크기 비교 추가
+  - 2026-08-09 왕채은: 최신 RandomForest 보고서와 병합하고 측정 해석 보완
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -134,6 +136,14 @@ def ensure_directories() -> None:
             directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise AnalysisError(f"프로젝트 폴더를 만들 수 없습니다: {exc.filename}") from exc
+
+
+def _safe_ratio(first: float, second: float) -> float | None:
+    """두 양수 측정값의 배수를 0 나눗셈 없이 계산한다."""
+    larger, smaller = max(first, second), min(first, second)
+    if smaller <= 0:
+        return None
+    return larger / smaller
 
 
 def generate_report(
@@ -300,6 +310,30 @@ def generate_report(
     top_dev_type_median = float(cast(Any, top_dev_type.at["median_salary"]))
     top_dev_type_respondents = int(cast(Any, top_dev_type.at["respondents"]))
     remote_income_ratio = math.exp(t["remote_log_mean"] - t["in_person_log_mean"])
+    pandas_load_seconds = comparison["pandas_load_seconds"]
+    polars_load_seconds = comparison["polars_load_seconds"]
+    pandas_dataframe_size_mb = comparison["pandas_dataframe_size_bytes"] / 1024**2
+    polars_dataframe_size_mb = comparison["polars_dataframe_size_bytes"] / 1024**2
+    faster_engine = "Polars" if polars_load_seconds < pandas_load_seconds else "Pandas"
+    load_speed_ratio = _safe_ratio(pandas_load_seconds, polars_load_seconds)
+    load_speed_text = (
+        f"약 {load_speed_ratio:.2f}배 더 빨랐고"
+        if load_speed_ratio is not None
+        else "더 빨랐지만 측정값이 0에 가까워 배수는 계산하지 않았고"
+    )
+    smaller_engine = (
+        "Polars"
+        if polars_dataframe_size_mb < pandas_dataframe_size_mb
+        else "Pandas"
+    )
+    dataframe_size_ratio = _safe_ratio(
+        pandas_dataframe_size_mb, polars_dataframe_size_mb
+    )
+    dataframe_size_text = (
+        f"약 {dataframe_size_ratio:.2f}배 더 작았다"
+        if dataframe_size_ratio is not None
+        else "더 작았지만 측정값이 0에 가까워 배수는 계산하지 않았다"
+    )
     sample_notice = (
         f"> 빠른 점검용 {sample_rows:,}행 결과입니다. 최종 제출 전 전체 실행하세요.\n"
         if sample_rows else "> 전체 데이터 실행 결과입니다.\n"
@@ -316,6 +350,16 @@ def generate_report(
 - 중복 ResponseId: Pandas `{comparison['pandas_duplicate_response_ids']:,}` / Polars `{comparison['polars_duplicate_response_ids']:,}`
 - 유효 소득 행: Pandas `{comparison['pandas_valid_income_rows']:,}` / Polars `{comparison['polars_valid_income_rows']:,}`
 - 핵심 품질 요약 일치: `{comparison['same_quality_summary']}`
+- 로딩 시간(워밍업 1회 + 순서 교대 {comparison['load_benchmark_trials']}회 반복 측정의 중앙값): Pandas `{pandas_load_seconds:.3f}초` / Polars `{polars_load_seconds:.3f}초`
+- 로딩 후 DataFrame 추정 크기: Pandas `{pandas_dataframe_size_mb:,.1f}MB` / Polars `{polars_dataframe_size_mb:,.1f}MB`
+
+> **해석:** 정합성 지표는 두 엔진이 동일한 파일을 올바르게 읽었는지
+> 확인하는 기준이다. 실제 성능 비교에서는 이번 실행의 `{faster_engine}`가
+> 로딩 속도가 {load_speed_text}, `{smaller_engine}`가 DataFrame 크기가
+> {dataframe_size_text}. 시간은 워밍업 뒤 시작 엔진을 교대해 측정한 중앙값이며,
+> 파일 캐시·머신 상태에 따라 달라질 수 있다. 크기는 로딩 중 피크 메모리가
+> 아니라 로딩이 끝난 객체의 추정치이므로 절대적인 메모리 사용량으로
+> 해석하지 않는다.
 
 ## 1. 원본 데이터 EDA
 
@@ -567,7 +611,13 @@ def main() -> int:
             ensure_directories()
             data_path = prepare_data_file(data_path)
             pandas_df, polars_df, comparison = load_data(data_path, args.sample_rows)
-            stage["detail"] = f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치"
+            stage["detail"] = (
+                f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치, "
+                f"로딩 중앙값 Pandas {comparison['pandas_load_seconds']:.2f}초/"
+                f"{comparison['pandas_dataframe_size_bytes'] / 1024**2:,.0f}MB vs "
+                f"Polars {comparison['polars_load_seconds']:.2f}초/"
+                f"{comparison['polars_dataframe_size_bytes'] / 1024**2:,.0f}MB"
+            )
         with stage_log(1, "원본 데이터 EDA") as stage:
             raw_overview, _ = analyze_raw_data(pandas_df, PROCESSED_DIR)
             stage["detail"] = "dtype·결측률·원본 급여 분포 저장"
