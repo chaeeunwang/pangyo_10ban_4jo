@@ -6,6 +6,13 @@ Stack Overflow Developer Survey 2024로 income(총 연간 보상)과 관련된 �
 
 최종 분석 결과는 [`outputs/report.md`](outputs/report.md)에서 확인할 수 있습니다.
 
+## 작성자와 공동 작업
+
+- 최초 작성자: **왕채은**
+- 팀원이 코드를 수정하면 해당 Python 파일의 머리말 `수정 이력`에
+  `YYYY-MM-DD 이름: 변경 내용` 형식으로 본인의 작업을 추가합니다.
+- 공동 작업 방법과 커밋 권장 형식은 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 따릅니다.
+
 `survey.pdf` 10페이지의 문항은 income을 급여·보너스·복리후생을
 포함한 세전 총 연간 보상으로 정의합니다. 원본 `CompTotal`과 `Currency`를
 국가 간 비교 가능한 달러로 환산한 `ConvertedCompYearly`를 목표값으로 사용합니다.
