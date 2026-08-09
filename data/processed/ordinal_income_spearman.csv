@@ -1,0 +1,4 @@
+feature,score_column,valid_rows,spearman_rho,p_value,significant_at_0_05,p_value_bonferroni,significant_bonferroni_0_05
+Age,Age_order,22956,0.4168688530566376,0.0,True,0.0,True
+Organization size,OrgSize_order,22622,0.19577614584645708,2.923923192037924e-194,True,8.771769576113773e-194,True
+Education level,EdLevel_order,22759,0.1007126636674959,2.185087666359763e-52,True,6.555262999079289e-52,True

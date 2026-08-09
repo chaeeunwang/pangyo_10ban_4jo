@@ -1,0 +1,17 @@
+# Python 실행 환경과 캐시
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 운영체제·편집기 임시 파일
+.DS_Store
+.idea/
+.vscode/
+
+# 원본 설문과 재생성 가능한 대용량 산출물은 공개 저장소에 포함하지 않는다.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/cleaned_salary_data.csv
+outputs/models/*.joblib
+!outputs/models/.gitkeep

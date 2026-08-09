@@ -1,0 +1,9 @@
+item,value
+rows_before,65437.0
+duplicate_response_ids,0.0
+missing_or_nonpositive_salary_rows,42002.0
+salary_lower_1pct_bound,207.68
+salary_upper_1pct_bound,393751.0599999984
+salary_outlier_rows,470.0
+rows_after,22965.0
+total_missing_cells_after,713934.0

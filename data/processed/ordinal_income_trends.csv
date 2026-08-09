@@ -1,0 +1,24 @@
+feature,order,category,respondents,median_income,q25,q75
+Age,0,Under 18 years old,61,8661.0,2103.0,17280.0
+Age,1,18-24 years old,3367,25777.0,10024.5,51555.0
+Age,2,25-34 years old,10183,60000.0,32222.0,95000.0
+Age,3,35-44 years old,6095,83777.0,53703.0,127388.0
+Age,4,45-54 years old,2277,98814.0,62000.0,148000.0
+Age,5,55-64 years old,840,109039.0,75184.0,160000.0
+Age,6,65 years or older,133,105000.0,57325.0,150000.0
+Education level,0,Primary/elementary school,136,47846.0,11739.25,98886.5
+Education level,1,"Secondary school (e.g. American high school, German Realschule or Gymnasium, etc.)",1168,45111.0,17977.5,76323.5
+Education level,2,Some college/university study without earning a degree,2740,59391.0,29000.0,100343.5
+Education level,3,"Associate degree (A.A., A.S., etc.)",736,61774.0,30074.0,101192.5
+Education level,4,"Bachelor’s degree (B.A., B.S., B.Eng., etc.)",10165,67000.0,30770.0,115000.0
+Education level,5,"Master’s degree (M.A., M.S., M.Eng., MBA, etc.)",6692,68240.5,42028.5,105258.0
+Education level,6,"Professional degree (JD, MD, Ph.D, Ed.D, etc.)",1122,77961.0,50955.0,118000.0
+Organization size,0,"Just me - I am a freelancer, sole proprietor, etc.",958,64444.0,23801.75,118321.0
+Organization size,1,2 to 9 employees,2129,48333.0,19603.0,85925.0
+Organization size,2,10 to 19 employees,2036,51555.0,23277.25,86401.0
+Organization size,3,20 to 99 employees,4990,60000.0,29909.0,96666.0
+Organization size,4,100 to 499 employees,4504,66822.5,37592.0,105884.5
+Organization size,5,500 to 999 employees,1615,72000.0,42962.0,109554.0
+Organization size,6,"1,000 to 4,999 employees",2753,72499.0,42962.0,115000.0
+Organization size,7,"5,000 to 9,999 employees",925,79617.0,43938.0,121018.0
+Organization size,8,"10,000 or more employees",2712,90793.5,49407.0,145700.0
