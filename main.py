@@ -6,6 +6,8 @@
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
   - 2026-08-09 황재원: 0단계 로그·report.md에 Pandas·Polars 로딩 속도·메모리 비교 추가
+  - 2026-08-09 황재원: 코드리뷰 반영 — "메모리"를 "DataFrame 추정 크기"로 표현 정정,
+    0 나눗셈 방어 추가, 벤치마크 측정 조건(반복 횟수)을 report에 명시
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -134,6 +136,18 @@ def ensure_directories() -> None:
         raise AnalysisError(f"프로젝트 폴더를 만들 수 없습니다: {exc.filename}") from exc
 
 
+def _safe_ratio(first: float, second: float) -> float | None:
+    """큰 값이 작은 값의 몇 배인지 0 나눗셈 없이 계산한다.
+
+    표본 행이 아주 적거나 측정값이 0에 가까우면 분모가 0이 될 수 있어,
+    그런 경우 배수를 정의할 수 없다는 뜻으로 None을 반환한다.
+    """
+    larger, smaller = max(first, second), min(first, second)
+    if smaller <= 0:
+        return None
+    return larger / smaller
+
+
 def generate_report(
     comparison: LoadComparison,
     raw_overview: pd.DataFrame,
@@ -249,14 +263,22 @@ def generate_report(
     remote_income_ratio = math.exp(t["remote_log_mean"] - t["in_person_log_mean"])
     pandas_load_seconds = comparison["pandas_load_seconds"]
     polars_load_seconds = comparison["polars_load_seconds"]
-    pandas_memory_mb = comparison["pandas_memory_bytes"] / 1024**2
-    polars_memory_mb = comparison["polars_memory_bytes"] / 1024**2
+    pandas_dataframe_size_mb = comparison["pandas_dataframe_size_bytes"] / 1024**2
+    polars_dataframe_size_mb = comparison["polars_dataframe_size_bytes"] / 1024**2
     faster_engine = "Polars" if polars_load_seconds < pandas_load_seconds else "Pandas"
-    load_speed_ratio = max(pandas_load_seconds, polars_load_seconds) / min(
-        pandas_load_seconds, polars_load_seconds
+    load_speed_ratio = _safe_ratio(pandas_load_seconds, polars_load_seconds)
+    load_speed_text = (
+        f"약 {load_speed_ratio:.2f}배 더 빨랐고"
+        if load_speed_ratio is not None
+        else "더 빨랐지만 측정값이 0에 가까워 배수는 계산하지 않았고"
     )
-    lighter_engine = "Polars" if polars_memory_mb < pandas_memory_mb else "Pandas"
-    memory_ratio = max(pandas_memory_mb, polars_memory_mb) / min(pandas_memory_mb, polars_memory_mb)
+    smaller_engine = "Polars" if polars_dataframe_size_mb < pandas_dataframe_size_mb else "Pandas"
+    dataframe_size_ratio = _safe_ratio(pandas_dataframe_size_mb, polars_dataframe_size_mb)
+    dataframe_size_text = (
+        f"약 {dataframe_size_ratio:.2f}배 더 작았다"
+        if dataframe_size_ratio is not None
+        else "더 작았지만 측정값이 0에 가까워 배수는 계산하지 않았다"
+    )
     sample_notice = (
         f"> 빠른 점검용 {sample_rows:,}행 결과입니다. 최종 제출 전 전체 실행하세요.\n"
         if sample_rows else "> 전체 데이터 실행 결과입니다.\n"
@@ -273,16 +295,21 @@ def generate_report(
 - 중복 ResponseId: Pandas `{comparison['pandas_duplicate_response_ids']:,}` / Polars `{comparison['polars_duplicate_response_ids']:,}`
 - 유효 소득 행: Pandas `{comparison['pandas_valid_income_rows']:,}` / Polars `{comparison['polars_valid_income_rows']:,}`
 - 핵심 품질 요약 일치: `{comparison['same_quality_summary']}`
-- 로딩 시간: Pandas `{pandas_load_seconds:.3f}초` / Polars `{polars_load_seconds:.3f}초`
-- 로딩 메모리 사용량: Pandas `{pandas_memory_mb:,.1f}MB` / Polars `{polars_memory_mb:,.1f}MB`
+- 로딩 시간(워밍업 1회 + 순서 교대 {comparison['load_benchmark_trials']}회 반복 측정의 중앙값): Pandas `{pandas_load_seconds:.3f}초` / Polars `{polars_load_seconds:.3f}초`
+- 로딩 후 DataFrame 추정 크기: Pandas `{pandas_dataframe_size_mb:,.1f}MB` / Polars `{polars_dataframe_size_mb:,.1f}MB`
 
 > **해석:** 정합성 지표(shape·결측·중복·유효행)는 두 엔진이 동일한 파일을
 > 올바르게 읽었는지 확인하는 것일 뿐, 두 라이브러리의 실질적 차이는
 > 아니다. 실제 차이는 성능에서 드러나는데, 이번 실행에서는
-> `{faster_engine}`가 로딩 속도가 약 {load_speed_ratio:.2f}배 더 빨랐고,
-> `{lighter_engine}`가 메모리 사용량이 약 {memory_ratio:.2f}배 더 적었다.
-> 측정값은 파일 크기·머신 상태에 따라 달라질 수 있어 절대적인 배수보다
-> 방향성(어느 엔진이 이 환경에서 더 가볍고 빨랐는지)으로 해석해야 한다.
+> `{faster_engine}`가 로딩 속도가 {load_speed_text},
+> `{smaller_engine}`가 DataFrame 크기가 {dataframe_size_text}.
+> 로딩 시간은 첫 실행 시 OS 파일 캐시가 없어 느릴 수 있어 워밍업 1회 뒤
+> 시작 엔진을 교대하며 반복 측정하고 평균 대신 중앙값을 썼다(평균은
+> 한두 번의 튐에 민감하다). DataFrame 크기는 로딩 중 피크 메모리가 아니라
+> 로딩이 끝난 객체의 추정 크기이므로 실제 최대 메모리 사용량과는 다를 수
+> 있다. 측정값 자체는 파일 크기·머신 상태에 따라 달라질 수 있어 절대적인
+> 배수보다 방향성(어느 엔진이 이 환경에서 더 가볍고 빨랐는지)으로
+> 해석해야 한다.
 
 ## 1. 원본 데이터 EDA
 
@@ -535,10 +562,10 @@ def main() -> int:
             pandas_df, polars_df, comparison = load_data(data_path, args.sample_rows)
             stage["detail"] = (
                 f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치, "
-                f"로딩 Pandas {comparison['pandas_load_seconds']:.2f}초/"
-                f"{comparison['pandas_memory_bytes'] / 1024**2:,.0f}MB vs "
+                f"로딩(중앙값) Pandas {comparison['pandas_load_seconds']:.2f}초/"
+                f"{comparison['pandas_dataframe_size_bytes'] / 1024**2:,.0f}MB vs "
                 f"Polars {comparison['polars_load_seconds']:.2f}초/"
-                f"{comparison['polars_memory_bytes'] / 1024**2:,.0f}MB"
+                f"{comparison['polars_dataframe_size_bytes'] / 1024**2:,.0f}MB"
             )
         with stage_log(1, "원본 데이터 EDA") as stage:
             raw_overview, _ = analyze_raw_data(pandas_df, PROCESSED_DIR)
