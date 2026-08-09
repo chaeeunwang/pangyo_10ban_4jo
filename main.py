@@ -253,8 +253,10 @@ def generate_report(
     report = f"""# Stack Overflow Survey 2024 income 분석·예측
 
 {sample_notice}
-## 0. Pandas·Polars 로딩 비교
+## 0. Pandas·Polars 로딩 및 성능 비교
 
+- **실행 시간 (Runtime):** Pandas `{comparison['pandas_runtime']:.4f}s` / Polars `{comparison['polars_runtime']:.4f}s`
+- **피크 메모리 (Peak Memory):** Pandas `{comparison['pandas_memory_usage']:.2f} MB` / Polars `{comparison['polars_memory_usage']:.2f} MB`
 - Pandas shape: `{comparison['pandas_shape']}`
 - Polars shape: `{comparison['polars_shape']}`
 - shape·열 순서 일치: `{comparison['same_shape'] and comparison['same_columns']}`

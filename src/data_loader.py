@@ -5,7 +5,7 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
-  - YYYY-MM-DD 이름: 변경 내용
+  - 2026-08-09 전은배: Polars와 Pandas의 실행 속도 및 메모리 사용량 측정을 위해 LoadComparison, load_data 수정
 
 주요 기능:
 - 로컬 results.csv 존재 및 Git LFS 포인터 여부 확인
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,6 +29,7 @@ from typing import TypedDict
 
 import pandas as pd
 import polars as pl
+from memory_profiler import memory_usage
 
 DATA_URL = (
     "https://media.githubusercontent.com/media/StackExchange/Survey/"
@@ -55,6 +57,10 @@ class AnalysisError(RuntimeError):
 class LoadComparison(TypedDict):
     """Pandas와 Polars의 로드 구조·핵심 품질 지표 비교 결과."""
 
+    pandas_runtime: float
+    polars_runtime: float
+    pandas_memory_usage: float
+    polars_memory_usage: float
     pandas_shape: list[int]
     polars_shape: list[int]
     same_shape: bool
@@ -140,9 +146,36 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
     `sample_rows`가 있으면 두 라이브러리에 동일하게 적용한다. 필수 열, shape,
     열 순서 중 하나라도 다르면 이후 분석 기준이 모호해지므로 즉시 중단한다.
     """
+
+    # 헬퍼 함수 정의 (타입 검사기가 타입을 정확히 추론함)
+    def _read_pandas() -> pd.DataFrame:
+        return pd.read_csv(path, nrows=sample_rows, na_values=["NA"], low_memory=False)
+
+    def _read_polars() -> pl.DataFrame:
+        return pl.read_csv(path, n_rows=sample_rows, null_values=["NA"])
+
     try:
-        pandas_df = pd.read_csv(path, nrows=sample_rows, low_memory=False)
-        polars_df = pl.read_csv(path, n_rows=sample_rows, null_values=["NA"], infer_schema_length=10_000)
+        # --- Pandas 로드 성능 측정 ---
+        start_pd = time.perf_counter()
+        mem_pd, pandas_df = memory_usage(
+            _read_pandas,  # type: ignore[arg-type]
+            interval=0.01,
+            retval=True,
+            max_usage=False,
+        )
+        pandas_runtime = time.perf_counter() - start_pd
+        pandas_memory_usage = max(mem_pd) - min(mem_pd) if mem_pd else 0.0
+
+        # --- Polars 로드 성능 측정 ---
+        start_pl = time.perf_counter()
+        mem_pl, polars_df = memory_usage(
+            _read_polars,  # type: ignore[arg-type]
+            interval=0.01,
+            retval=True,
+            max_usage=False,
+        )
+        polars_runtime = time.perf_counter() - start_pl
+        polars_memory_usage = max(mem_pl) - min(mem_pl) if mem_pl else 0.0
     except (pd.errors.ParserError, pd.errors.EmptyDataError, pl.exceptions.PolarsError, OSError, UnicodeDecodeError) as exc:
         raise AnalysisError(f"CSV를 로드하지 못했습니다: {path}") from exc
     if pandas_df.empty:
@@ -166,6 +199,10 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
         polars_df.select((polars_salary.is_not_null() & (polars_salary > 0)).sum()).item()
     )
     comparison: LoadComparison = {
+        "pandas_runtime": round(pandas_runtime, 4),
+        "polars_runtime": round(polars_runtime, 4),
+        "pandas_memory_usage": round(pandas_memory_usage, 2),
+        "polars_memory_usage": round(polars_memory_usage, 2),
         "pandas_shape": list(pandas_df.shape), "polars_shape": list(polars_df.shape),
         "same_shape": pandas_df.shape == polars_df.shape,
         "same_columns": pandas_df.columns.tolist() == polars_df.columns,
