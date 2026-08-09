@@ -46,8 +46,8 @@ DAY2/
 데이터를 내려받아 `data/raw/results.csv`로 저장한 뒤 실행합니다.
 
 ```bash
-git clone https://github.com/chaeeunwang/판교_10반_4조.git
-cd 판교_10반_4조
+git clone https://github.com/chaeeunwang/pangyo_10ban_4jo.git
+cd pangyo_10ban_4jo
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
