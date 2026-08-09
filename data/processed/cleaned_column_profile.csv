@@ -16,7 +16,7 @@ YearsCode_num,float64,41,0.17853254953189637,52
 DevType,object,31,0.13498802525582407,34
 Age_order,float64,9,0.039190071848465055,7
 RemoteWork,object,8,0.034835619420857826,3
-ConvertedCompYearly,float64,0,0.0,5892
 log_salary,float64,0,0.0,5892
+ConvertedCompYearly,float64,0,0.0,5892
 Country,object,0,0.0,161
 EdLevel,object,0,0.0,8

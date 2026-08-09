@@ -256,14 +256,15 @@ def generate_report(
 ## 0. Pandas·Polars 로딩 및 성능 비교
 
 - **실행 시간 (Runtime):** Pandas `{comparison['pandas_runtime']:.4f}s` / Polars `{comparison['polars_runtime']:.4f}s`
-- **피크 메모리 (Peak Memory):** Pandas `{comparison['pandas_memory_usage']:.2f} MB` / Polars `{comparison['polars_memory_usage']:.2f} MB`
-- Pandas shape: `{comparison['pandas_shape']}`
-- Polars shape: `{comparison['polars_shape']}`
-- shape·열 순서 일치: `{comparison['same_shape'] and comparison['same_columns']}`
-- 결측 셀: Pandas `{comparison['pandas_missing_cells']:,}` / Polars `{comparison['polars_missing_cells']:,}`
-- 중복 ResponseId: Pandas `{comparison['pandas_duplicate_response_ids']:,}` / Polars `{comparison['polars_duplicate_response_ids']:,}`
-- 유효 소득 행: Pandas `{comparison['pandas_valid_income_rows']:,}` / Polars `{comparison['polars_valid_income_rows']:,}`
-- 핵심 품질 요약 일치: `{comparison['same_quality_summary']}`
+- **피크 메모리 (Peak RAM):** Pandas `{comparison['pandas_memory_usage']:.2f} MB` / Polars `{comparison['polars_memory_usage']:.2f} MB`
+- **데이터 객체 크기 (In-Memory Size):** Pandas `{comparison['pandas_object_size_mb']:.2f} MB` / Polars `{comparison['polars_object_size_mb']:.2f} MB`
+- **Pandas Shape:** `{comparison['pandas_shape']}`
+- **Polars Shape:** `{comparison['polars_shape']}`
+- **Shape·열 순서 일치:** `{comparison['same_shape'] and comparison['same_columns']}`
+- **결측 셀 수:** Pandas `{comparison['pandas_missing_cells']:,}` / Polars `{comparison['polars_missing_cells']:,}`
+- **중복 ResponseId 수:** Pandas `{comparison['pandas_duplicate_response_ids']:,}` / Polars `{comparison['polars_duplicate_response_ids']:,}`
+- **유효 소득 행 수:** Pandas `{comparison['pandas_valid_income_rows']:,}` / Polars `{comparison['polars_valid_income_rows']:,}`
+- **핵심 품질 요약 일치:** `{comparison['same_quality_summary']}`
 
 ## 1. 원본 데이터 EDA
 

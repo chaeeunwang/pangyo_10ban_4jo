@@ -5,12 +5,14 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
-  - 2026-08-09 전은배: Polars와 Pandas의 실행 속도 및 메모리 사용량 측정을 위해 LoadComparison, load_data 수정
+  - 2026-08-09 전은배: Polars·Pandas 성능 벤치마크 파이프라인 개편 (스키마 확충 및 격리 프로세스 기반 측정 로직 구현)
+  - 2026-08-09 전은배: IPC 대용량 객체 전송 이슈 해결 (벤치마크 측정과 데이터 로딩 안전 분리)
 
 주요 기능:
 - 로컬 results.csv 존재 및 Git LFS 포인터 여부 확인
 - 필요 시 임시 파일로 다운로드한 뒤 크기·헤더 검증 후 원자적 교체
-- Pandas·Polars 양쪽 로딩 후 shape와 열 순서 교차 검증
+- 격리 프로세스를 통한 Pandas·Polars 순수 로딩 성능(Peak Memory, Runtime) 측정
+- 메인 프로세스 데이터 로딩 후 shape와 열 순서 교차 검증
 
 `main.py` 0단계에서 호출되며, 이 모듈은 원본 값을 변경하지 않고
 DataFrame을 다음 단계에 전달한다. 파일 작성 중 실패해도 기존 CSV를
@@ -24,8 +26,9 @@ import shutil
 import time
 import urllib.error
 import urllib.request
+from multiprocessing import Pipe
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pandas as pd
 import polars as pl
@@ -61,6 +64,8 @@ class LoadComparison(TypedDict):
     polars_runtime: float
     pandas_memory_usage: float
     polars_memory_usage: float
+    pandas_object_size_mb: float
+    polars_object_size_mb: float
     pandas_shape: list[int]
     polars_shape: list[int]
     same_shape: bool
@@ -122,11 +127,7 @@ def _download(path: Path) -> None:
 
 
 def prepare_data_file(path: Path) -> Path:
-    """로컬 CSV를 우선 사용하고, 없거나 LFS 포인터이면 공식 CSV를 받는다.
-
-    반환값은 비어 있지 않은 CSV 후보 경로다. 폴더 경로, 저장 실패,
-    네트워크 오류, 비정상 다운로드는 AnalysisError로 전환한다.
-    """
+    """로컬 CSV를 우선 사용하고, 없거나 LFS 포인터이면 공식 CSV를 받는다."""
     if path.exists() and path.is_dir():
         raise AnalysisError(f"--data에는 CSV 파일을 지정해야 합니다: {path}")
     try:
@@ -140,52 +141,130 @@ def prepare_data_file(path: Path) -> Path:
     return path
 
 
+# --- 격리 프로세스용 벤치마크 워커 (DataFrame을 전달하지 않음) ---
+
+def _benchmark_worker_pandas(path: str, sample_rows: int | None, conn: Any) -> None:
+    """Pandas 순수 로딩 후 메인 프로세스에는 경량 통계 지표만 전송한다."""
+    try:
+        df = pd.read_csv(
+            path,
+            nrows=sample_rows,
+            na_values=["NA"],
+            low_memory=False
+        )
+        df_size_mb = float(df.memory_usage(deep=True).sum() / (1024 ** 2))
+        conn.send((True, df_size_mb))
+    except Exception as exc:
+        conn.send((False, exc))
+    finally:
+        conn.close()
+
+
+def _benchmark_worker_polars(path: str, sample_rows: int | None, conn: Any) -> None:
+    """Polars 순수 로딩 후 메인 프로세스에는 경량 통계 지표만 전송한다."""
+    try:
+        df = pl.read_csv(
+            path,
+            n_rows=sample_rows,
+            null_values=["NA"],
+            infer_schema_length=None
+        )
+        df_size_mb = float(df.estimated_size() / (1024 ** 2))
+        conn.send((True, df_size_mb))
+    except Exception as exc:
+        conn.send((False, exc))
+    finally:
+        conn.close()
+
+
+def _measure_loading_performance(
+    target_worker: Any,
+    args: tuple[Any, ...]
+) -> tuple[float, float, float]:
+    """별도 프로세스에서 로딩을 수행해 (Runtime, Peak RAM MB, DataFrame MB) 메트릭만 안전하게 수집한다."""
+    parent_conn, child_conn = Pipe()
+    full_args = (*args, child_conn)
+
+    start_time = time.perf_counter()
+    mem_usage, _ = memory_usage(
+        proc=(target_worker, full_args, {}),  # type: ignore[arg-type]
+        interval=0.005,
+        retval=True,
+        max_usage=False,
+    )
+    runtime = time.perf_counter() - start_time
+
+    # 자식 프로세스 수신 검증
+    if not parent_conn.poll():
+        raise AnalysisError("프로세스가 데이터 수집 전 비정상 종료되었습니다.")
+
+    success, payload = parent_conn.recv()
+    if not success:
+        raise payload
+
+    obj_size_mb = payload
+    peak_mem_mb = max(mem_usage) - min(mem_usage) if mem_usage else 0.0
+
+    return runtime, peak_mem_mb, obj_size_mb
+
+
+# --- 데이터 로딩 로직 ---
+
+def _load_pandas(path: str, sample_rows: int | None) -> pd.DataFrame:
+    return pd.read_csv(
+        path,
+        nrows=sample_rows,
+        na_values=["NA"],
+        low_memory=False
+    )
+
+
+def _load_polars(path: str, sample_rows: int | None) -> pl.DataFrame:
+    return pl.read_csv(
+        path,
+        n_rows=sample_rows,
+        null_values=["NA"],
+        infer_schema_length=None
+    )
+
+
 def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.DataFrame, LoadComparison]:
-    """동일한 CSV를 두 라이브러리로 로드하고 행·열 구조를 교차 검증한다.
+    """동일한 CSV를 두 라이브러리로 로드하고 행·열 구조를 교차 검증한다."""
 
-    `sample_rows`가 있으면 두 라이브러리에 동일하게 적용한다. 필수 열, shape,
-    열 순서 중 하나라도 다르면 이후 분석 기준이 모호해지므로 즉시 중단한다.
-    """
+    str_path = str(path)
 
-    # 헬퍼 함수 정의 (타입 검사기가 타입을 정확히 추론함)
-    def _read_pandas() -> pd.DataFrame:
-        return pd.read_csv(path, nrows=sample_rows, na_values=["NA"], low_memory=False)
-
-    def _read_polars() -> pl.DataFrame:
-        return pl.read_csv(path, n_rows=sample_rows, null_values=["NA"])
+    # Disk I/O Caching 불공정 제거를 위한 OS File Buffer Warm-up
+    try:
+        with open(str_path, "rb") as f:
+            while f.read(1024 * 1024):
+                pass
+    except OSError as exc:
+        raise AnalysisError(f"CSV를 읽을 수 없습니다: {path}") from exc
 
     try:
-        # --- Pandas 로드 성능 측정 ---
-        start_pd = time.perf_counter()
-        mem_pd, pandas_df = memory_usage(
-            _read_pandas,  # type: ignore[arg-type]
-            interval=0.01,
-            retval=True,
-            max_usage=False,
+        # 1. 독립 프로세스에서 Peak Memory 및 Runtime 측정 (객체 수신 없음)
+        pandas_runtime, pandas_peak_mem, pandas_obj_size = _measure_loading_performance(
+            _benchmark_worker_pandas, (str_path, sample_rows)
         )
-        pandas_runtime = time.perf_counter() - start_pd
-        pandas_memory_usage = max(mem_pd) - min(mem_pd) if mem_pd else 0.0
+        polars_runtime, polars_peak_mem, polars_obj_size = _measure_loading_performance(
+            _benchmark_worker_polars, (str_path, sample_rows)
+        )
 
-        # --- Polars 로드 성능 측정 ---
-        start_pl = time.perf_counter()
-        mem_pl, polars_df = memory_usage(
-            _read_polars,  # type: ignore[arg-type]
-            interval=0.01,
-            retval=True,
-            max_usage=False,
-        )
-        polars_runtime = time.perf_counter() - start_pl
-        polars_memory_usage = max(mem_pl) - min(mem_pl) if mem_pl else 0.0
+        # 2. 메인 프로세스에서 실제 DataFrame 로딩 (IPC 오버헤드 0%)
+        pandas_df = _load_pandas(str_path, sample_rows)
+        polars_df = _load_polars(str_path, sample_rows)
+
     except (pd.errors.ParserError, pd.errors.EmptyDataError, pl.exceptions.PolarsError, OSError, UnicodeDecodeError) as exc:
         raise AnalysisError(f"CSV를 로드하지 못했습니다: {path}") from exc
+
     if pandas_df.empty:
         raise AnalysisError("CSV에 분석할 행이 없습니다.")
+
     missing = sorted(REQUIRED_COLUMNS.difference(pandas_df.columns))
     if missing:
         raise AnalysisError("필수 열이 없습니다: " + ", ".join(missing))
-    # shape만 같으면 두 로더가 NA나 숫자 타입을 다르게 해석해도
-    # 놓칠 수 있다. 후속 분석에 직접 영향을 주는 핵심 품질 지표를
-    # 각 엔진에서 독립적으로 계산해 로딩 결과를 교차 검증한다.
+
+    # 핵심 품질 지표 독립 계산 및 교차 검증
     pandas_salary = pd.to_numeric(pandas_df["ConvertedCompYearly"], errors="coerce")
     polars_salary = pl.col("ConvertedCompYearly").cast(pl.Float64, strict=False)
     pandas_missing = int(pandas_df.isna().sum().sum())
@@ -198,12 +277,16 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
     polars_valid_income = int(
         polars_df.select((polars_salary.is_not_null() & (polars_salary > 0)).sum()).item()
     )
+
     comparison: LoadComparison = {
         "pandas_runtime": round(pandas_runtime, 4),
         "polars_runtime": round(polars_runtime, 4),
-        "pandas_memory_usage": round(pandas_memory_usage, 2),
-        "polars_memory_usage": round(polars_memory_usage, 2),
-        "pandas_shape": list(pandas_df.shape), "polars_shape": list(polars_df.shape),
+        "pandas_memory_usage": round(pandas_peak_mem, 2),
+        "polars_memory_usage": round(polars_peak_mem, 2),
+        "pandas_object_size_mb": round(pandas_obj_size, 2),
+        "polars_object_size_mb": round(polars_obj_size, 2),
+        "pandas_shape": list(pandas_df.shape),
+        "polars_shape": list(polars_df.shape),
         "same_shape": pandas_df.shape == polars_df.shape,
         "same_columns": pandas_df.columns.tolist() == polars_df.columns,
         "pandas_missing_cells": pandas_missing,
@@ -218,11 +301,14 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
             and pandas_valid_income == polars_valid_income
         ),
     }
+
     print("[로드 비교]", json.dumps(comparison, ensure_ascii=False))
+
     if (
         not comparison["same_shape"]
         or not comparison["same_columns"]
         or not comparison["same_quality_summary"]
     ):
         raise AnalysisError("Pandas와 Polars의 로딩·품질 요약 결과가 다릅니다.")
+
     return pandas_df, polars_df, comparison

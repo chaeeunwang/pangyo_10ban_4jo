@@ -2,15 +2,18 @@
 
 > 전체 데이터 실행 결과입니다.
 
-## 0. Pandas·Polars 로딩 비교
+## 0. Pandas·Polars 로딩 및 성능 비교
 
-- Pandas shape: `[65437, 114]`
-- Polars shape: `[65437, 114]`
-- shape·열 순서 일치: `True`
-- 결측 셀: Pandas `2,890,957` / Polars `2,890,957`
-- 중복 ResponseId: Pandas `0` / Polars `0`
-- 유효 소득 행: Pandas `23,435` / Polars `23,435`
-- 핵심 품질 요약 일치: `True`
+- **실행 시간 (Runtime):** Pandas `5.2414s` / Polars `0.5625s`
+- **피크 메모리 (Peak RAM):** Pandas `353.16 MB` / Polars `505.55 MB`
+- **데이터 객체 크기 (In-Memory Size):** Pandas `418.44 MB` / Polars `145.08 MB`
+- **Pandas Shape:** `[65437, 114]`
+- **Polars Shape:** `[65437, 114]`
+- **Shape·열 순서 일치:** `True`
+- **결측 셀 수:** Pandas `2,890,957` / Polars `2,890,957`
+- **중복 ResponseId 수:** Pandas `0` / Polars `0`
+- **유효 소득 행 수:** Pandas `23,435` / Polars `23,435`
+- **핵심 품질 요약 일치:** `True`
 
 ## 1. 원본 데이터 EDA
 
@@ -267,19 +270,19 @@ fold 안에서만 학습했다.
 - 선택 모델: **Tuned RandomForest**
 - 검증: train 내부 5-Fold 교차검증 + Random Forest 최대 8개 조합 RandomizedSearchCV
 - CV log RMSE: **1.019 ± 0.042**
-- CV log R-squared: **0.443 ± 0.021**
+- CV log R-squared: **0.442 ± 0.021**
 - 누수 방지: holdout test를 모델 선택·튜닝에서 격리하고 train에서만 IQR 경계·전처리·어휘 학습
 - train 기반 IQR 범위: `$0.00` ~ `$221,445.38`
 - 학습 행: `18,748` -> `17,961`
 - test 행: `4,687` -> `4,497`
-- IQR test MAE: **$23,134.22**
-- IQR test RMSE: **$33,454.34**
+- IQR test MAE: **$23,144.39**
+- IQR test RMSE: **$33,463.47**
 - IQR test R-squared: **0.566**
-- IQR test log RMSE: **1.032**
-- IQR test log R-squared: **0.441**
-- 전체 test MAE: **$32,385.01**
-- 전체 test RMSE: **$85,313.68**
-- 전체 test R-squared: **0.224**
+- IQR test log RMSE: **1.033**
+- IQR test log R-squared: **0.440**
+- 전체 test MAE: **$32,397.88**
+- 전체 test RMSE: **$85,325.67**
+- 전체 test R-squared: **0.223**
 - 전체 test log R-squared: **0.450**
 - 저장: `outputs/models/survey_income_prediction_pipeline.joblib`
 
@@ -288,8 +291,8 @@ fold 안에서만 학습했다.
 | model              | tuned   |   cv_log_rmse_mean |   cv_log_rmse_std |   cv_log_r2_mean |   cv_mae_usd_mean |
 |:-------------------|:--------|-------------------:|------------------:|-----------------:|------------------:|
 | Ridge              | False   |             1.0111 |            0.0439 |           0.4514 |           24614.2 |
-| Tuned RandomForest | True    |             1.0192 |            0.042  |           0.4425 |           23500   |
-| RandomForest       | False   |             1.021  |            0.0427 |           0.4406 |           23775.3 |
+| Tuned RandomForest | True    |             1.0193 |            0.0418 |           0.4424 |           23503.8 |
+| RandomForest       | False   |             1.0213 |            0.0424 |           0.4403 |           23776.4 |
 
 Ridge는 선형 기준선으로 함께 표시하고, 이번 실험에서는 요청한 Random Forest를
 튜닝·저장한다. 튜닝 결과가 기본 Random Forest보다 나쁠 경우에는 기본
@@ -297,8 +300,8 @@ Random Forest를 유지한다.
 
 > **성능 해석:** train에서 정한 IQR 범위의 일반 income 응답에서는 분산의
 > 56.6%를 설명하고 평균 절대오차는
-> $23,134다. 극단값을 포함한 전체 test R-squared는
-> 0.224로, 평가 모집단을 제한하면 성능이 얼마나
+> $23,144다. 극단값을 포함한 전체 test R-squared는
+> 0.223로, 평가 모집단을 제한하면 성능이 얼마나
 > 달라지는지 함께 보여준다. 따라서 IQR 지표를 전체 응답자 성능으로
 > 일반화하지 않고 두 결과를 구분해 해석해야 한다.
 
@@ -306,18 +309,18 @@ Random Forest를 유지한다.
 
 | feature                     |   importance_mean |   importance_std | metric             |
 |:----------------------------|------------------:|-----------------:|:-------------------|
-| Country                     |            0.4256 |           0.0037 | decrease_in_log_r2 |
-| YearsCode_num               |            0.058  |           0.0074 | decrease_in_log_r2 |
-| Employment                  |            0.0143 |           0.0023 | decrease_in_log_r2 |
-| YearsCodePro_num            |            0.0118 |           0.0051 | decrease_in_log_r2 |
-| ProfessionalTech            |            0.0093 |           0.0006 | decrease_in_log_r2 |
-| LanguageHaveWorkedWith      |            0.007  |           0.0026 | decrease_in_log_r2 |
-| PlatformHaveWorkedWith      |            0.0065 |           0.0015 | decrease_in_log_r2 |
-| OrgSize_order               |            0.0061 |           0.0013 | decrease_in_log_r2 |
-| DatabaseHaveWorkedWith      |            0.0056 |           0.0017 | decrease_in_log_r2 |
-| CodingActivities            |            0.0038 |           0.0006 | decrease_in_log_r2 |
-| ProfessionalExperienceRatio |            0.0031 |           0.001  | decrease_in_log_r2 |
-| RemoteWork                  |            0.0029 |           0.0012 | decrease_in_log_r2 |
+| Country                     |            0.4238 |           0.004  | decrease_in_log_r2 |
+| YearsCode_num               |            0.0576 |           0.0072 | decrease_in_log_r2 |
+| Employment                  |            0.0145 |           0.0021 | decrease_in_log_r2 |
+| YearsCodePro_num            |            0.0119 |           0.005  | decrease_in_log_r2 |
+| ProfessionalTech            |            0.009  |           0.0007 | decrease_in_log_r2 |
+| LanguageHaveWorkedWith      |            0.0066 |           0.0023 | decrease_in_log_r2 |
+| OrgSize_order               |            0.0059 |           0.0015 | decrease_in_log_r2 |
+| PlatformHaveWorkedWith      |            0.0058 |           0.0015 | decrease_in_log_r2 |
+| DatabaseHaveWorkedWith      |            0.0057 |           0.0016 | decrease_in_log_r2 |
+| RemoteWork                  |            0.003  |           0.0014 | decrease_in_log_r2 |
+| ProfessionalExperienceRatio |            0.0028 |           0.0011 | decrease_in_log_r2 |
+| CodingActivities            |            0.0028 |           0.0008 | decrease_in_log_r2 |
 
 표의 중요도는 holdout 일부에서 각 원 입력 열을 섞었을 때 감소한 log R-squared다.
 양수 값이 클수록 현재 모델이 그 입력에 더 의존하지만, 인과관계 순위는 아니다.

@@ -109,7 +109,7 @@ LearnCode,object,4949,7.5629995262619,418
 EdLevel,object,4653,7.110656050858077,8
 AISelect,object,4530,6.922688998578785,3
 MainBranch,object,0,0.0,5
-Check,object,0,0.0,1
-Employment,object,0,0.0,110
 Age,object,0,0.0,8
+Employment,object,0,0.0,110
+Check,object,0,0.0,1
 ResponseId,int64,0,0.0,65437
