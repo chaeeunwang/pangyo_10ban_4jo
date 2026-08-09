@@ -5,6 +5,7 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
+  - 2026-08-09 황재원: Pandas·Polars 로딩 속도·메모리 사용량 비교 추가
   - YYYY-MM-DD 이름: 변경 내용
 
 주요 기능:
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -53,7 +55,7 @@ class AnalysisError(RuntimeError):
 
 
 class LoadComparison(TypedDict):
-    """Pandas와 Polars의 로드 구조·핵심 품질 지표 비교 결과."""
+    """Pandas와 Polars의 로드 구조·핵심 품질 지표·성능(속도·메모리) 비교 결과."""
 
     pandas_shape: list[int]
     polars_shape: list[int]
@@ -66,6 +68,10 @@ class LoadComparison(TypedDict):
     pandas_valid_income_rows: int
     polars_valid_income_rows: int
     same_quality_summary: bool
+    pandas_load_seconds: float
+    polars_load_seconds: float
+    pandas_memory_bytes: int
+    polars_memory_bytes: int
 
 
 def _is_git_lfs_pointer(path: Path) -> bool:
@@ -135,14 +141,21 @@ def prepare_data_file(path: Path) -> Path:
 
 
 def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.DataFrame, LoadComparison]:
-    """동일한 CSV를 두 라이브러리로 로드하고 행·열 구조를 교차 검증한다.
+    """동일한 CSV를 두 라이브러리로 로드하고 행·열 구조·성능을 비교한다.
 
     `sample_rows`가 있으면 두 라이브러리에 동일하게 적용한다. 필수 열, shape,
     열 순서 중 하나라도 다르면 이후 분석 기준이 모호해지므로 즉시 중단한다.
+    로딩 시간·메모리 사용량은 정합성 판정에는 쓰지 않고 참고 지표로만 담는다
+    (엔진마다 다르게 나오는 게 정상이라 실패 조건으로 삼지 않는다).
     """
     try:
+        pandas_started = time.perf_counter()
         pandas_df = pd.read_csv(path, nrows=sample_rows, low_memory=False)
+        pandas_load_seconds = time.perf_counter() - pandas_started
+
+        polars_started = time.perf_counter()
         polars_df = pl.read_csv(path, n_rows=sample_rows, null_values=["NA"], infer_schema_length=10_000)
+        polars_load_seconds = time.perf_counter() - polars_started
     except (pd.errors.ParserError, pd.errors.EmptyDataError, pl.exceptions.PolarsError, OSError, UnicodeDecodeError) as exc:
         raise AnalysisError(f"CSV를 로드하지 못했습니다: {path}") from exc
     if pandas_df.empty:
@@ -165,6 +178,10 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
     polars_valid_income = int(
         polars_df.select((polars_salary.is_not_null() & (polars_salary > 0)).sum()).item()
     )
+    # 문자열까지 포함한 실제 상주 메모리를 봐야 두 엔진의 차이가 드러나므로
+    # Pandas는 deep=True로 합산하고, Polars는 내장 estimated_size()를 쓴다.
+    pandas_memory_bytes = int(pandas_df.memory_usage(deep=True).sum())
+    polars_memory_bytes = int(polars_df.estimated_size())
     comparison: LoadComparison = {
         "pandas_shape": list(pandas_df.shape), "polars_shape": list(polars_df.shape),
         "same_shape": pandas_df.shape == polars_df.shape,
@@ -180,6 +197,10 @@ def load_data(path: Path, sample_rows: int | None) -> tuple[pd.DataFrame, pl.Dat
             and pandas_duplicates == polars_duplicates
             and pandas_valid_income == polars_valid_income
         ),
+        "pandas_load_seconds": pandas_load_seconds,
+        "polars_load_seconds": polars_load_seconds,
+        "pandas_memory_bytes": pandas_memory_bytes,
+        "polars_memory_bytes": polars_memory_bytes,
     }
     print("[로드 비교]", json.dumps(comparison, ensure_ascii=False))
     if (

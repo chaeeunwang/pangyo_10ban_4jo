@@ -5,6 +5,7 @@
 - 공동 수정자는 이 파일을 변경할 때 아래 형식으로 이력을 추가한다.
 - 수정 이력:
   - 2026-08-09 왕채은: 공동 작업용 작성자·수정 이력 형식 추가
+  - 2026-08-09 황재원: 0단계 로그·report.md에 Pandas·Polars 로딩 속도·메모리 비교 추가
   - YYYY-MM-DD 이름: 변경 내용
 
 역할:
@@ -246,6 +247,16 @@ def generate_report(
     top_dev_type_median = float(cast(Any, top_dev_type.at["median_salary"]))
     top_dev_type_respondents = int(cast(Any, top_dev_type.at["respondents"]))
     remote_income_ratio = math.exp(t["remote_log_mean"] - t["in_person_log_mean"])
+    pandas_load_seconds = comparison["pandas_load_seconds"]
+    polars_load_seconds = comparison["polars_load_seconds"]
+    pandas_memory_mb = comparison["pandas_memory_bytes"] / 1024**2
+    polars_memory_mb = comparison["polars_memory_bytes"] / 1024**2
+    faster_engine = "Polars" if polars_load_seconds < pandas_load_seconds else "Pandas"
+    load_speed_ratio = max(pandas_load_seconds, polars_load_seconds) / min(
+        pandas_load_seconds, polars_load_seconds
+    )
+    lighter_engine = "Polars" if polars_memory_mb < pandas_memory_mb else "Pandas"
+    memory_ratio = max(pandas_memory_mb, polars_memory_mb) / min(pandas_memory_mb, polars_memory_mb)
     sample_notice = (
         f"> 빠른 점검용 {sample_rows:,}행 결과입니다. 최종 제출 전 전체 실행하세요.\n"
         if sample_rows else "> 전체 데이터 실행 결과입니다.\n"
@@ -262,6 +273,16 @@ def generate_report(
 - 중복 ResponseId: Pandas `{comparison['pandas_duplicate_response_ids']:,}` / Polars `{comparison['polars_duplicate_response_ids']:,}`
 - 유효 소득 행: Pandas `{comparison['pandas_valid_income_rows']:,}` / Polars `{comparison['polars_valid_income_rows']:,}`
 - 핵심 품질 요약 일치: `{comparison['same_quality_summary']}`
+- 로딩 시간: Pandas `{pandas_load_seconds:.3f}초` / Polars `{polars_load_seconds:.3f}초`
+- 로딩 메모리 사용량: Pandas `{pandas_memory_mb:,.1f}MB` / Polars `{polars_memory_mb:,.1f}MB`
+
+> **해석:** 정합성 지표(shape·결측·중복·유효행)는 두 엔진이 동일한 파일을
+> 올바르게 읽었는지 확인하는 것일 뿐, 두 라이브러리의 실질적 차이는
+> 아니다. 실제 차이는 성능에서 드러나는데, 이번 실행에서는
+> `{faster_engine}`가 로딩 속도가 약 {load_speed_ratio:.2f}배 더 빨랐고,
+> `{lighter_engine}`가 메모리 사용량이 약 {memory_ratio:.2f}배 더 적었다.
+> 측정값은 파일 크기·머신 상태에 따라 달라질 수 있어 절대적인 배수보다
+> 방향성(어느 엔진이 이 환경에서 더 가볍고 빨랐는지)으로 해석해야 한다.
 
 ## 1. 원본 데이터 EDA
 
@@ -512,7 +533,13 @@ def main() -> int:
             ensure_directories()
             data_path = prepare_data_file(data_path)
             pandas_df, polars_df, comparison = load_data(data_path, args.sample_rows)
-            stage["detail"] = f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치"
+            stage["detail"] = (
+                f"{len(pandas_df):,}행 x {pandas_df.shape[1]}열, 구조 일치, "
+                f"로딩 Pandas {comparison['pandas_load_seconds']:.2f}초/"
+                f"{comparison['pandas_memory_bytes'] / 1024**2:,.0f}MB vs "
+                f"Polars {comparison['polars_load_seconds']:.2f}초/"
+                f"{comparison['polars_memory_bytes'] / 1024**2:,.0f}MB"
+            )
         with stage_log(1, "원본 데이터 EDA") as stage:
             raw_overview, _ = analyze_raw_data(pandas_df, PROCESSED_DIR)
             stage["detail"] = "dtype·결측률·원본 급여 분포 저장"
